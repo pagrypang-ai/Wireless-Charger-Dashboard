@@ -517,7 +517,6 @@ def build_value_matrix(chart_df: pd.DataFrame) -> alt.Chart:
             alt.Tooltip("rating:Q", title="Rating", format=".1f"),
             alt.Tooltip("number_of_reviews:Q", title="Reviews", format=",.0f"),
             alt.Tooltip("key_specs:N", title="Key Specs"),
-            alt.Tooltip("full_product_info:N", title="Full Product Info"),
         ],
     )
 
