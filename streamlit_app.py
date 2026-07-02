@@ -552,6 +552,7 @@ def component_rows(chart_df: pd.DataFrame) -> list[dict[str, object]]:
         rows.append(
             {
                 "product": compact_text(row.get("product_label")) or "Unnamed product",
+                "brand": compact_text(row.get("brand")) or "Unknown",
                 "price": price,
                 "productValue": product_value,
                 "imageUrl": image_url,
@@ -579,10 +580,18 @@ def render_value_matrix_component(chart_df: pd.DataFrame, domain_df: pd.DataFram
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17202a; background: #fff; }
+    .component-panel { border: 1px solid #e4e8ef; border-radius: 8px; background: #fff; }
+    .chart-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px 0; }
+    .chart-top h2 { margin: 0; font-size: 15px; line-height: 1.2; }
+    .mode-switch { display: inline-flex; align-items: center; gap: 6px; color: #667085; font-size: 12px; }
+    .mode-button { min-height: 30px; border: 1px solid #cfd6e2; border-radius: 6px; background: #fff; color: #344054; padding: 6px 10px; font: inherit; font-weight: 700; cursor: pointer; }
+    .mode-button:hover { border-color: #0f766e; color: #0f766e; }
+    .mode-button.active { border-color: #0f766e; background: #dff4ef; color: #0b5f58; }
     .chart-wrap { position: relative; width: 100%; overflow: hidden; }
     svg { display: block; width: 100%; height: 640px; }
     .product-marker { cursor: pointer; transition: transform .12s ease; }
     .point-image { cursor: pointer; }
+    .brand-label { pointer-events: none; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-opacity: .75; }
     .tooltip {
       position: fixed;
       z-index: 20;
@@ -608,13 +617,29 @@ def render_value_matrix_component(chart_df: pd.DataFrame, domain_df: pd.DataFram
   </style>
 </head>
 <body>
-  <div class="chart-wrap">
-    <svg id="chart" role="img" aria-label="Wireless charger value matrix"></svg>
-    <div class="tooltip" id="tooltip"></div>
+  <div class="component-panel">
+    <div class="chart-top">
+      <h2>Price-Value Matrix</h2>
+      <div class="mode-switch" role="group" aria-label="Marker mode">
+        <span>Marker</span>
+        <button type="button" class="mode-button active" data-mode="image">Product images</button>
+        <button type="button" class="mode-button" data-mode="brand">Brand dots</button>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <svg id="chart" role="img" aria-label="Wireless charger value matrix"></svg>
+      <div class="tooltip" id="tooltip"></div>
+    </div>
   </div>
   <script id="dashboard-data" type="application/json">__DATA__</script>
   <script>
     const DATA = JSON.parse(document.getElementById("dashboard-data").textContent);
+    const state = { markerMode: "image" };
+    const brandPalette = [
+      "#2563EB", "#DC2626", "#16A34A", "#9333EA", "#EA580C", "#0891B2",
+      "#C026D3", "#65A30D", "#BE123C", "#0D9488", "#CA8A04", "#4F46E5",
+      "#E11D48", "#0284C7", "#7C2D12", "#047857"
+    ];
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
     const money = value => Number.isFinite(value) ? `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "n/a";
     const median = values => {
@@ -623,6 +648,22 @@ def render_value_matrix_component(chart_df: pd.DataFrame, domain_df: pd.DataFram
       const mid = Math.floor(sorted.length / 2);
       return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     };
+    const brandColorMap = rows => {
+      const brands = [...new Set(rows.map(row => String(row.brand || "Unknown").trim() || "Unknown"))].sort((a, b) => a.localeCompare(b));
+      return new Map(brands.map((brand, index) => [brand, brandPalette[index % brandPalette.length]]));
+    };
+    function syncModeButtons() {
+      document.querySelectorAll(".mode-button").forEach(button => {
+        button.classList.toggle("active", button.dataset.mode === state.markerMode);
+      });
+    }
+    document.querySelectorAll(".mode-button").forEach(button => {
+      button.addEventListener("click", () => {
+        state.markerMode = button.dataset.mode || "image";
+        syncModeButtons();
+        renderChart(DATA.rows, DATA.domainRows);
+      });
+    });
 
     function renderChart(data, domainData) {
       const svg = document.getElementById("chart");
@@ -636,8 +677,10 @@ def render_value_matrix_component(chart_df: pd.DataFrame, domain_df: pd.DataFram
       const innerH = height - margin.top - margin.bottom;
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
-      const chartRows = data.filter(row => Number.isFinite(row.price) && Number.isFinite(row.productValue) && row.imageUrl);
+      const imageMode = state.markerMode === "image";
+      const chartRows = data.filter(row => Number.isFinite(row.price) && Number.isFinite(row.productValue) && (!imageMode || row.imageUrl));
       const domainRows = (domainData.length ? domainData : chartRows).filter(row => Number.isFinite(row.price) && Number.isFinite(row.productValue));
+      const colorByBrand = brandColorMap(domainRows.length ? domainRows : chartRows);
       const domainSource = domainRows.length ? domainRows : [{ price: 0, productValue: 0 }, { price: 100, productValue: 100 }];
       const xVals = domainSource.map(row => row.price).filter(Number.isFinite);
       const yVals = domainSource.map(row => row.productValue).filter(Number.isFinite);
@@ -703,11 +746,19 @@ def render_value_matrix_component(chart_df: pd.DataFrame, domain_df: pd.DataFram
       chartRows.forEach((row, index) => {
         const x = sx(row.price), y = sy(row.productValue);
         const size = 42;
+        const brand = String(row.brand || "Unknown").trim() || "Unknown";
+        const brandColor = colorByBrand.get(brand) || brandPalette[index % brandPalette.length];
         const baseTransform = `translate(${x} ${y})`;
-        const hoverTransform = `translate(${x} ${y}) scale(1.1)`;
+        const hoverTransform = imageMode ? `translate(${x} ${y}) scale(1.1)` : baseTransform;
         const g = add("g", { tabindex: "0", role: "link", "aria-label": row.product, class: "product-marker", transform: baseTransform }, markerLayer);
-        add("rect", { x: -size / 2, y: -size / 2, width: size, height: size, rx: 6, fill: "#fff" }, g);
-        add("image", { href: row.imageUrl, x: -size / 2 + 2, y: -size / 2 + 2, width: size - 4, height: size - 4, preserveAspectRatio: "xMidYMid meet", class: "point-image" }, g);
+        if (imageMode) {
+          add("rect", { x: -size / 2, y: -size / 2, width: size, height: size, rx: 6, fill: "#fff" }, g);
+          add("image", { href: row.imageUrl, x: -size / 2 + 2, y: -size / 2 + 2, width: size - 4, height: size - 4, preserveAspectRatio: "xMidYMid meet", class: "point-image" }, g);
+        } else {
+          add("circle", { cx: 0, cy: 0, r: 8, fill: brandColor, stroke: "#ffffff", "stroke-width": 1.8 }, g);
+          const label = add("text", { x: 0, y: 22, "text-anchor": "middle", fill: brandColor, "fill-opacity": .42, "font-size": 10, "font-weight": 700, class: "brand-label" }, g);
+          label.textContent = brand;
+        }
         const restore = () => {
           if (g.parentNode !== markerLayer) markerLayer.insertBefore(g, markerLayer.children[index] || null);
           g.setAttribute("transform", baseTransform);
@@ -764,6 +815,7 @@ def render_value_matrix_component(chart_df: pd.DataFrame, domain_df: pd.DataFram
       };
     }
 
+    syncModeButtons();
     renderChart(DATA.rows, DATA.domainRows);
     window.addEventListener("resize", () => renderChart(DATA.rows, DATA.domainRows));
   </script>
@@ -771,7 +823,7 @@ def render_value_matrix_component(chart_df: pd.DataFrame, domain_df: pd.DataFram
 </html>
 """.replace("__DATA__", data_json)
 
-    components.html(html, height=700, scrolling=False)
+    components.html(html, height=740, scrolling=False)
 
 
 def build_value_matrix(chart_df: pd.DataFrame) -> alt.Chart:
