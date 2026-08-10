@@ -389,8 +389,6 @@ def main() -> None:
         ("Adapter included", "Adapter included"),
         ("Magnetic or not", "Magnetic or not"),
     ]:
-        default = ["Available"] if column == "Availability on Query Date" else None
-        filtered = apply_multiselect(df, filtered, label, column, default)
         filtered = apply_multiselect(df, filtered, label, column, default_filter_values(column))
 
     render_metrics(filtered)
