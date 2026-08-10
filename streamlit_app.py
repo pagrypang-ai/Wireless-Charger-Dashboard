@@ -312,7 +312,7 @@ def render_chart(df: pd.DataFrame) -> None:
         tooltip=tooltip,
         href="Link:N",
     )
-    image = base.mark_image(width=44, height=44).encode(url="Image URL:N")
+    image = base.mark_image(width=52, height=52, aspect=False).encode(url="Image URL:N")
     dots = base.mark_circle(size=180, opacity=0.75).encode(color=alt.Color("Brand:N", legend=None))
     labels = base.mark_text(dy=28, fontSize=10, opacity=0.55).encode(text="Brand:N")
     chart = (dots + image + labels).properties(height=620).interactive()
