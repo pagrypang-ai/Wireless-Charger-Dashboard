@@ -15,6 +15,7 @@ APP_TITLE = "Wireless Charger Price-Value Matrix"
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CSV = BASE_DIR / "sample_wireless_charger_products.csv"
 GOOGLE_SHEET_SECRET = "GOOGLE_SHEET_CSV_URL"
+DATE_COLUMN_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 VALUE_WEIGHTS = {
     "simultaneous_device_count": 0.50,
@@ -74,6 +75,40 @@ def clean_text(value) -> str:
     if pd.isna(value):
         return ""
     return re.sub(r"\s+", " ", str(value)).strip()
+
+
+def detect_date_columns(df: pd.DataFrame) -> list[str]:
+    date_columns = [str(column) for column in df.columns if DATE_COLUMN_RE.match(str(column))]
+    return sorted(date_columns, key=lambda column: pd.to_datetime(column))
+
+
+def availability_on_query_date(row: pd.Series, query_date, date_columns: list[str]) -> str:
+    if not date_columns:
+        return "Available"
+
+    query_ts = pd.to_datetime(query_date)
+    status = "Unavailable"
+    for column in date_columns:
+        column_ts = pd.to_datetime(column)
+        if column_ts > query_ts:
+            break
+
+        cell_value = clean_text(row.get(column)).lower()
+        if "unavailable" in cell_value:
+            status = "Unavailable"
+        elif "add" in cell_value or cell_value == "available":
+            status = "Available"
+    return status
+
+
+def add_availability_column(df: pd.DataFrame, query_date) -> pd.DataFrame:
+    date_columns = detect_date_columns(df)
+    result = df.copy()
+    result["Availability on Query Date"] = result.apply(
+        lambda row: availability_on_query_date(row, query_date, date_columns),
+        axis=1,
+    )
+    return result
 
 
 def derive_supported_types(value) -> str:
@@ -212,12 +247,22 @@ def filter_options(df: pd.DataFrame, column: str) -> list[str]:
     return values
 
 
-def apply_multiselect(df: pd.DataFrame, label: str, column: str) -> pd.DataFrame:
-    options = filter_options(df, column)
-    selected = st.sidebar.multiselect(label, options, default=options)
+def apply_multiselect(
+    options_df: pd.DataFrame,
+    filtered_df: pd.DataFrame,
+    label: str,
+    column: str,
+    default_values: list[str] | None = None,
+) -> pd.DataFrame:
+    options = filter_options(options_df, column)
+    if default_values is None:
+        default = options
+    else:
+        default = [value for value in default_values if value in options]
+    selected = st.sidebar.multiselect(label, options, default=default)
     if not selected:
-        return df.iloc[0:0]
-    return df[df[column].isin(selected)]
+        return filtered_df.iloc[0:0]
+    return filtered_df[filtered_df[column].isin(selected)]
 
 
 def money(value) -> str:
@@ -270,24 +315,8 @@ def render_chart(df: pd.DataFrame) -> None:
     image = base.mark_image(width=44, height=44).encode(url="Image URL:N")
     dots = base.mark_circle(size=180, opacity=0.75).encode(color=alt.Color("Brand:N", legend=None))
     labels = base.mark_text(dy=28, fontSize=10, opacity=0.55).encode(text="Brand:N")
-    st.altair_chart((dots + image + labels).interactive(), use_container_width=True)
-
-
-def render_table(df: pd.DataFrame) -> None:
-    columns = [
-        "Brand",
-        "Style",
-        "Simultaneous Charging Devices",
-        "Supported Device Types",
-        "iPhone max",
-        "Watch max",
-        "Earbud max",
-        "Price",
-        "Adapter included",
-        "Magnetic or not",
-        "Link",
-    ]
-    st.dataframe(df[columns], use_container_width=True, hide_index=True)
+    chart = (dots + image + labels).properties(height=620).interactive()
+    st.altair_chart(chart, use_container_width=True)
 
 
 def main() -> None:
@@ -299,8 +328,18 @@ def main() -> None:
     df = normalize_columns(raw_df)
 
     st.sidebar.caption(f"Data source: {source}")
+
+    date_columns = detect_date_columns(df)
+    if date_columns:
+        query_date = st.sidebar.selectbox("Query Date", date_columns, index=len(date_columns) - 1)
+        df = add_availability_column(df, query_date)
+    else:
+        df["Availability on Query Date"] = "Available"
+
     filtered = df.copy()
     for label, column in [
+        ("Channels", "Platform"),
+        ("Availability on Query Date", "Availability on Query Date"),
         ("Brand", "Brand"),
         ("Style", "Style"),
         ("Supported Device Types", "Supported Device Types"),
@@ -309,12 +348,11 @@ def main() -> None:
         ("Adapter included", "Adapter included"),
         ("Magnetic or not", "Magnetic or not"),
     ]:
-        filtered = apply_multiselect(filtered, label, column)
+        default = ["Available"] if column == "Availability on Query Date" else None
+        filtered = apply_multiselect(df, filtered, label, column, default)
 
     render_metrics(filtered)
     render_chart(filtered)
-    st.subheader("Product Data")
-    render_table(filtered)
 
 
 if __name__ == "__main__":
