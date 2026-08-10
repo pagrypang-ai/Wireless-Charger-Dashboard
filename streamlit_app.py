@@ -16,6 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CSV = BASE_DIR / "sample_wireless_charger_products.csv"
 GOOGLE_SHEET_SECRET = "GOOGLE_SHEET_CSV_URL"
 DATE_COLUMN_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+BLANK_FILTER_LABEL = "(Blank)"
 
 VALUE_WEIGHTS = {
     "simultaneous_device_count": 0.50,
@@ -243,7 +244,10 @@ def load_data(uploaded_file) -> tuple[pd.DataFrame, str]:
 
 
 def filter_options(df: pd.DataFrame, column: str) -> list[str]:
-    values = sorted({clean_text(value) for value in df[column].dropna() if clean_text(value)})
+    values = {clean_text(value) or BLANK_FILTER_LABEL for value in df[column].dropna()}
+    if df[column].isna().any():
+        values.add(BLANK_FILTER_LABEL)
+    values = sorted(values)
     return values
 
 
@@ -262,7 +266,8 @@ def apply_multiselect(
     selected = st.sidebar.multiselect(label, options, default=default)
     if not selected:
         return filtered_df.iloc[0:0]
-    return filtered_df[filtered_df[column].isin(selected)]
+    filter_values = filtered_df[column].apply(lambda value: clean_text(value) or BLANK_FILTER_LABEL)
+    return filtered_df[filter_values.isin(selected)]
 
 
 def money(value) -> str:
