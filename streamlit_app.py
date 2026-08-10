@@ -301,6 +301,10 @@ def apply_multiselect(
     return filtered_df[filter_values.isin(selected)]
 
 
+def default_filter_values(column: str) -> list[str] | None:
+    return None
+
+
 def money(value) -> str:
     number = parse_number(value)
     return f"${number:,.2f}" if number is not None else ""
@@ -387,6 +391,7 @@ def main() -> None:
     ]:
         default = ["Available"] if column == "Availability on Query Date" else None
         filtered = apply_multiselect(df, filtered, label, column, default)
+        filtered = apply_multiselect(df, filtered, label, column, default_filter_values(column))
 
     render_metrics(filtered)
     render_chart(filtered)
