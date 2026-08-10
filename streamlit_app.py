@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 
@@ -12,7 +13,8 @@ st.set_page_config(page_title="Wireless Charger Value Matrix", layout="wide")
 
 APP_TITLE = "Wireless Charger Price-Value Matrix"
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_CSV = BASE_DIR.parent / "walmart_wireless_chargers_instore_serpapi_split_devices.csv"
+DEFAULT_CSV = BASE_DIR / "sample_wireless_charger_products.csv"
+GOOGLE_SHEET_SECRET = "GOOGLE_SHEET_CSV_URL"
 
 VALUE_WEIGHTS = {
     "simultaneous_device_count": 0.50,
@@ -163,10 +165,46 @@ def read_csv(path_or_file) -> pd.DataFrame:
     return pd.read_csv(path_or_file, dtype=str, keep_default_na=False)
 
 
+def get_google_sheet_csv_url() -> str:
+    secret_url = ""
+    try:
+        secret_url = st.secrets.get(GOOGLE_SHEET_SECRET, "")
+    except (FileNotFoundError, KeyError):
+        secret_url = ""
+    return clean_text(secret_url or os.getenv(GOOGLE_SHEET_SECRET, ""))
+
+
+def normalize_google_sheet_url(url: str) -> str:
+    clean_url = clean_text(url)
+    if "docs.google.com/spreadsheets" not in clean_url:
+        return clean_url
+    if any(marker in clean_url for marker in ["format=csv", "output=csv", "tqx=out:csv"]):
+        return clean_url
+
+    sheet_id_match = re.search(r"/spreadsheets/d/([^/]+)", clean_url)
+    if not sheet_id_match:
+        return clean_url
+    gid_match = re.search(r"(?:[?#&]gid=)(\d+)", clean_url)
+    gid = gid_match.group(1) if gid_match else "0"
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id_match.group(1)}/export?format=csv&gid={gid}"
+
+
 def load_data(uploaded_file) -> tuple[pd.DataFrame, str]:
     if uploaded_file is not None:
         return read_csv(uploaded_file), "Uploaded CSV"
-    return read_csv(DEFAULT_CSV), str(DEFAULT_CSV)
+
+    google_sheet_url = normalize_google_sheet_url(get_google_sheet_csv_url())
+    if google_sheet_url:
+        return read_csv(google_sheet_url), "Google Sheets"
+
+    if DEFAULT_CSV.exists():
+        return read_csv(DEFAULT_CSV), str(DEFAULT_CSV)
+
+    st.error(
+        "No data source configured. Add GOOGLE_SHEET_CSV_URL in Streamlit Secrets, "
+        "upload a CSV from the sidebar, or include sample_wireless_charger_products.csv next to streamlit_app.py."
+    )
+    st.stop()
 
 
 def filter_options(df: pd.DataFrame, column: str) -> list[str]:
