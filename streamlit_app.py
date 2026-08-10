@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 import re
@@ -196,6 +197,36 @@ def product_value(df: pd.DataFrame) -> pd.Series:
     return score.round(1)
 
 
+def add_plot_jitter(df: pd.DataFrame) -> pd.DataFrame:
+    result = df.copy()
+    result["Plot Price Num"] = result["Price Num"]
+    result["Plot Product Value"] = result["Product Value"]
+
+    valid_mask = result["Price Num"].notna() & result["Product Value"].notna()
+    valid_df = result.loc[valid_mask]
+    if valid_df.empty:
+        return result
+
+    price_range = float(valid_df["Price Num"].max() - valid_df["Price Num"].min())
+    value_range = float(valid_df["Product Value"].max() - valid_df["Product Value"].min())
+    x_radius = max(price_range * 0.004, 0.35)
+    y_radius = max(value_range * 0.006, 0.75)
+
+    grouped = valid_df.groupby(["Price Num", "Product Value"], dropna=False, sort=False)
+    for _coordinates, indexes in grouped.groups.items():
+        index_list = list(indexes)
+        count = len(index_list)
+        if count <= 1:
+            continue
+
+        for position, index in enumerate(index_list):
+            angle = 2 * math.pi * position / count
+            result.at[index, "Plot Price Num"] = result.at[index, "Price Num"] + math.cos(angle) * x_radius
+            result.at[index, "Plot Product Value"] = result.at[index, "Product Value"] + math.sin(angle) * y_radius
+
+    return result
+
+
 @st.cache_data(ttl=900)
 def read_csv(path_or_file) -> pd.DataFrame:
     return pd.read_csv(path_or_file, dtype=str, keep_default_na=False)
@@ -291,6 +322,7 @@ def render_chart(df: pd.DataFrame) -> None:
     if chart_df.empty:
         st.info("No products match the current filters.")
         return
+    chart_df = add_plot_jitter(chart_df)
 
     tooltip = [
         alt.Tooltip("Product Label:N", title="Product"),
@@ -308,9 +340,9 @@ def render_chart(df: pd.DataFrame) -> None:
     ]
 
     base = alt.Chart(chart_df).encode(
-        x=alt.X("Price Num:Q", title="Price", scale=alt.Scale(zero=False), axis=alt.Axis(format="$,.0f")),
+        x=alt.X("Plot Price Num:Q", title="Price", scale=alt.Scale(zero=False), axis=alt.Axis(format="$,.0f")),
         y=alt.Y(
-            "Product Value:Q",
+            "Plot Product Value:Q",
             title="Simultaneous charging devices + iPhone max charging power",
             scale=alt.Scale(zero=False),
         ),
